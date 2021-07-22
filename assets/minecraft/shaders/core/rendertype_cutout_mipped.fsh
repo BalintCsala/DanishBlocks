@@ -25,68 +25,85 @@ in mat4 mvp;
 out vec4 fragColor;
 
 float getHeight(vec2 uv) {
-    uv = mod(uv, 0.5) - 0.25;
-    float dist = length(uv);
-    return KNOB_HEIGHT - step(0.125, dist) * KNOB_HEIGHT;
+    if (normal.y > 0.75) {
+        uv = mod(uv, 0.5) - 0.25;
+        float dist = length(uv);
+        return KNOB_HEIGHT - step(0.125, dist) * KNOB_HEIGHT;
+    } else {
+        uv = abs(uv - 0.5);
+        float dEdge = 0.375 - max(uv.x, uv.y);
+        float dCylinder = abs(length(uv) - 0.707 / 2.0 + 0.14) - 0.015;
+        float dist = min(dEdge, dCylinder);
+        return 1.0 + (step(0, dist)) * 0.5 - EPSILON;
+    }
 }
 
 bool isInside(vec2 uv) {
-    uv = mod(uv, 0.5) - 0.25;
-    return length(uv) < 0.12;
+    if (normal.y > 0.75) {
+        uv = mod(uv, 0.5) - 0.25;
+        return length(uv) < 0.12;
+    } else {
+        uv = abs(uv - 0.5);
+        float dEdge = 0.37 - max(uv.x, uv.y);
+        float dCylinder = abs(length(uv) - 0.707 / 2.0 + 0.14) - 0.01;
+        float dist = min(dEdge, dCylinder);
+        return dist < 0;
+    }
 }
 
 void main() {
     gl_FragDepth = gl_FragCoord.z;
     vec4 color = texture(Sampler0, texCoord0) * vertexColor * ColorModulator;
     vec3 modulator = vec3(1);
-    if (normal.y > 1 - EPSILON && isCuboid > 0.5) {
+
+    float yMul = normal.y > 0.75 ? -1 : 1;
+
+    if (abs(normal.y) > 0.75 && isCuboid > 0.5) {
         vec3 pos = vertexPos;
         vec3 rayDir = normalize(pos);
         pos -= rayDir * EPSILON;
-        vec2 fPos = fract(pos.xz - ChunkOffset.xz);
-        float dist = length(pos);
-        float distanceToTop = abs(fract(pos.y - ChunkOffset.y));
+        vec3 fPos = fract(pos - ChunkOffset);
         
-        if (distanceToTop < KNOB_HEIGHT) {
+        if (normal.y > 0.75 && fPos.y < KNOB_HEIGHT) {
             vec3 distances;
-            distances.y = KNOB_HEIGHT - distanceToTop;
-            distances.xz = sign(rayDir.xz) * 0.5 - 0.5 + fPos;
+            distances.y = fPos.y - KNOB_HEIGHT;
+            distances.xz = sign(rayDir.xz) * 0.5 - 0.5 + fPos.xz;
             vec3 steps = abs(distances / rayDir);
             float minStep = min(steps.x, min(steps.y, steps.z));
-            fPos -= minStep * rayDir.xz;
-            distanceToTop += minStep * -rayDir.y;
+            fPos -= minStep * rayDir;
+            pos -= minStep * rayDir;
         }
-        float stepSize = distanceToTop / -rayDir.y / STEPS;
-        float relativeY = distanceToTop;
-        for (int i = 0; i < STEPS; i++) {
-            float height = getHeight(fPos);
 
-            if (relativeY < height) {
-                modulator = vec3(isInside(fPos - rayDir.xz * stepSize) ? 1.0 : 0.8);
+        float stepSize = fPos.y / rayDir.y / STEPS * yMul;
+        for (int i = 0; i < STEPS; i++) {
+            float height = getHeight(fPos.xz);
+
+            if ((normal.y > 0.75 && fPos.y < height) || (normal.y < -0.75 && fPos.y > height)) {
+                modulator = vec3(isInside(fPos.xz - rayDir.xz * stepSize) ? 1.0 : 0.8);
                 break;
             }
-            fPos += rayDir.xz * stepSize;
+
+            fPos += rayDir * stepSize;
             pos += rayDir * stepSize;
-            relativeY -= -rayDir.y * stepSize;
         }
 
+        if (any(greaterThan(abs(fPos.xz - 0.5), vec2(0.5 + 0.01))))
+                discard;
+        
         // Refinement
         float scaleFactor = 0.5;
         for (int i = 0; i < 5; i++) {
             float stepDir = 1;
-            float height = getHeight(fPos);
-            if (relativeY < height) {
+            float height = getHeight(fPos.xz);
+            if ((normal.y > 0.75 && fPos.y < height) || (normal.y < -0.75 && fPos.y > height)) {
                 stepDir = -1;
             }
-            fPos += rayDir.xz * stepSize * scaleFactor * stepDir;
+            fPos += rayDir * stepSize * scaleFactor * stepDir;
             pos += rayDir * stepSize * scaleFactor * stepDir;
-            relativeY -= -rayDir.y * stepSize * scaleFactor * stepDir;
             scaleFactor /= 2;
         }
 
-        if (any(greaterThan(abs(fPos - 0.5), vec2(0.5 + 0.01))))
-                discard;
-        vec2 texCoord = (floor(texCoord0 * 64) + fract(fPos)) / 64;
+        vec2 texCoord = (floor(texCoord0 * 64) + fract(fPos.xz)) / 64;
         color = texture(Sampler0, texCoord) * vertexColor * ColorModulator * vec4(0.9);
         vec4 glpos = mvp * vec4(pos, 1);
         gl_FragDepth = glpos.z / glpos.w * 0.5 + 0.5;

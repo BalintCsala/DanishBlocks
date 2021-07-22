@@ -28,11 +28,10 @@ out mat4 mvp;
 void main() {
     vertexPos = Position + ChunkOffset;
     texCoord0 = UV0;
-
+    
     vec3 viewDirection = normalize(vertexPos);//(vec4(0, 0, 1, 0) * ModelViewMat).xyz;
-    isCuboid = 0;
+    isCuboid = (abs(Normal.y) > 0.75 && fract(Position.y) < EPSILON) ? 1 : 0;
     if (Normal.y > 0.75 && fract(Position.y) < EPSILON) {
-        isCuboid = 1;
         float viewDot;
         vec2 direction = vec2(-SQRT2_2, SQRT2_2);
         if (gl_VertexID % 4 == 0) {
